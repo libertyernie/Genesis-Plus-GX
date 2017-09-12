@@ -265,14 +265,14 @@ void slot_autosave(int slot, int device)
   }
 }
 
-void write_slot0_fat_sram_path(char* dest)
+void write_slot0_fat_sram_path(char* filename, const char* rom_filename)
 {
   sprintf (filename,"/saver/%s.sav", rom_filename);
   FILE *gbafp = fopen(filename, "rb");
-  if (fp)
+  if (gbafp)
   {
     /* GBA save file exists */
-    fp.close();
+    fclose(gbafp);
   }
   else
   {
@@ -297,7 +297,7 @@ void slot_autodetect(int slot, int device, t_slot *ptr)
     }
     else
     {
-      write_slot0_fat_sram_path (filename);
+      write_slot0_fat_sram_path (filename, rom_filename);
     }
 
     /* Open file */
@@ -375,7 +375,7 @@ int slot_delete(int slot, int device)
     }
     else
     {
-      write_slot0_fat_sram_path (filename);
+      write_slot0_fat_sram_path (filename, rom_filename);
     }
 
     /* Delete file */
@@ -440,7 +440,7 @@ int slot_load(int slot, int device)
     }
     else
     {
-      write_slot0_fat_sram_path (filename);
+      write_slot0_fat_sram_path (filename, rom_filename);
     }
 
     /* Open file */
@@ -745,7 +745,7 @@ int slot_save(int slot, int device)
     }
     else
     {
-      write_slot0_fat_sram_path (filename);
+      write_slot0_fat_sram_path (filename, rom_filename);
     }
 
     /* Check if file is SMSAdvance SRAM */
@@ -759,13 +759,13 @@ int slot_save(int slot, int device)
 
     u32 gbatag;
     fread(&gbatag, sizeof(u32), 1, gbafp);
-    fclose(gpafp);
+    fclose(gbafp);
 
     if (goomba_is_sram(&gbatag))
     {
       void* gba_data = malloc(GOOMBA_COLOR_SRAM_SIZE);
   
-      gbafp = fopen(filepath, "rb");
+      gbafp = fopen(filename, "rb");
       fread(gba_data, 1, GOOMBA_COLOR_SRAM_SIZE, gbafp);
       fclose(gbafp);
       
