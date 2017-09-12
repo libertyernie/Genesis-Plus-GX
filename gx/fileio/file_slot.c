@@ -43,6 +43,7 @@
 #include "gui.h"
 #include "filesel.h"
 #include "saveicon.h"
+#include "smsadvance/goombasav.h"
 
 /**
  * libOGC CARD System Work Area
@@ -264,6 +265,22 @@ void slot_autosave(int slot, int device)
   }
 }
 
+void write_slot0_fat_sram_path(char* dest)
+{
+  sprintf (filename,"/saver/%s.sav", rom_filename);
+  FILE *gbafp = fopen(filename, "rb");
+  if (fp)
+  {
+    /* GBA save file exists */
+    fp.close();
+  }
+  else
+  {
+    /* Use normal file path */
+    sprintf (filename,"%s/saves/%s.srm", DEFAULT_PATH, rom_filename);
+  }
+}
+
 void slot_autodetect(int slot, int device, t_slot *ptr)
 {
   if (!ptr) return;
@@ -280,7 +297,7 @@ void slot_autodetect(int slot, int device, t_slot *ptr)
     }
     else
     {
-      sprintf (filename,"%s/saves/%s.srm", DEFAULT_PATH, rom_filename);
+      write_slot0_fat_sram_path (filename);
     }
 
     /* Open file */
@@ -358,7 +375,7 @@ int slot_delete(int slot, int device)
     }
     else
     {
-      sprintf (filename,"%s/saves/%s.srm", DEFAULT_PATH, rom_filename);
+      write_slot0_fat_sram_path (filename);
     }
 
     /* Delete file */
@@ -423,7 +440,7 @@ int slot_load(int slot, int device)
     }
     else
     {
-      sprintf (filename,"%s/saves/%s.srm", DEFAULT_PATH, rom_filename);
+      write_slot0_fat_sram_path (filename);
     }
 
     /* Open file */
@@ -570,7 +587,72 @@ int slot_load(int slot, int device)
   else
   {
     /* load SRAM (max. 64 KB)*/
-    if (done < 0x10000)
+    if (goomba_is_sram(buffer)) {
+      void* cleaned = goomba_cleanup(buffer);
+      if (!cleaned)
+      {
+        free(buffer);
+        GUI_WaitPrompt("Error", goomba_last_error());
+        return 0;
+      }
+      else if (cleaned != buffer)
+      {
+        memcpy(buffer, cleaned, GOOMBA_COLOR_SRAM_SIZE);
+        free(cleaned);
+      }
+      
+      // Look for just one save file. If there aren't any, or there is more than one, don't read any data.
+      const stateheader* sh1 = NULL;
+      const stateheader* sh2 = NULL;
+  
+      const stateheader* sh = stateheader_first(buffer);
+      while (sh && stateheader_plausible(sh))
+      {
+        if (little_endian_conv_16(sh->type) != GOOMBA_SRAMSAVE)
+        { }
+        else if (sh1 == NULL)
+        {
+          sh1 = sh;
+        }
+        else
+        {
+          sh2 = sh;
+          break;
+        }
+        sh = stateheader_advance(sh);
+      }
+  
+      if (sh1 == NULL)
+      {
+        free(buffer);
+        GUI_WaitPrompt("Error", "SMSAdvance save file has no SRAM, cannot save!");
+        return 0;
+      }
+      else if (sh2 != NULL)
+      {
+        free(buffer);
+        GUI_WaitPrompt("Error", "SMSAdvance save file has more than one SRAM, cannot save!");
+        return 0;
+      }
+      else
+      {
+        goomba_size_t len;
+        void* extracted = goomba_extract(buffer, sh1, &len);
+        if (!extracted)
+        {
+          free(buffer);
+          GUI_WaitPrompt("Error", goomba_last_error());
+          return 0;
+        }
+        else
+        {
+          memcpy(sram.sram, extracted, len);
+          memset(sram.sram + done, 0xFF, 0x10000 - len);
+          free(extracted);
+        }
+      }
+    }
+    else if (done < 0x10000)
     {
       memcpy(sram.sram, buffer, done);
       memset(sram.sram + done, 0xFF, 0x10000 - done);
@@ -663,7 +745,87 @@ int slot_save(int slot, int device)
     }
     else
     {
-      sprintf(filename, "%s/saves/%s.srm", DEFAULT_PATH, rom_filename);
+      write_slot0_fat_sram_path (filename);
+    }
+
+    /* Check if file is SMSAdvance SRAM */
+    FILE *gbafp = fopen(filename, "rb");
+    if (!gbafp)
+    {
+      GUI_WaitPrompt("Error","Unable to open file !");
+      free(buffer);
+      return 0;
+    }
+
+    u32 gbatag;
+    fread(&gbatag, sizeof(u32), 1, gbafp);
+    fclose(gpafp);
+
+    if (goomba_is_sram(&gbatag))
+    {
+      void* gba_data = malloc(GOOMBA_COLOR_SRAM_SIZE);
+  
+      gbafp = fopen(filepath, "rb");
+      fread(gba_data, 1, GOOMBA_COLOR_SRAM_SIZE, gbafp);
+      fclose(gbafp);
+      
+      void* cleaned = goomba_cleanup(gba_data);
+      if (!cleaned) {
+        GUI_WaitPrompt("Error", goomba_last_error());
+        free(gba_data);
+        free(buffer);
+        return 0;
+      } else if (cleaned != gba_data) {
+        memcpy(gba_data, cleaned, GOOMBA_COLOR_SRAM_SIZE);
+        free(cleaned);
+      }
+
+      // Look for just one save file. If there aren't any, or there is more than one, don't read any data.
+      const stateheader* sh1 = NULL;
+      const stateheader* sh2 = NULL;
+
+      const stateheader* sh = stateheader_first(gba_data);
+      while (sh && stateheader_plausible(sh)) {
+        if (little_endian_conv_16(sh->type) != GOOMBA_SRAMSAVE) {}
+        else if (sh1 == NULL) {
+          sh1 = sh;
+        }
+        else {
+          sh2 = sh;
+          break;
+        }
+        sh = stateheader_advance(sh);
+      }
+
+      if (sh1 == NULL)
+      {
+        GUI_WaitPrompt("Error", "SMSAdvance save file has no SRAM, cannot save!");
+        free(gba_data);
+        free(buffer);
+        return 0;
+      }
+      else if (sh2 != NULL)
+      {
+        GUI_WaitPrompt("Error", "SMSAdvance save file has more than one SRAM, cannot save!");
+        free(gba_data);
+        free(buffer);
+        return 0;
+      }
+      else
+      {
+        char* newdata = goomba_new_sav(gba_data, sh1, buffer, filesize);
+        if (!newdata) {
+          GUI_WaitPrompt("Error", goomba_last_error());
+          free(gba_data);
+          free(buffer);
+          return 0;
+        } else {
+          memcpy(buffer, newdata, GOOMBA_COLOR_SRAM_SIZE);
+          filesize = GOOMBA_COLOR_SRAM_SIZE;
+          free(gba_data);
+          free(newdata);
+        }
+      }
     }
 
     /* Open file */
